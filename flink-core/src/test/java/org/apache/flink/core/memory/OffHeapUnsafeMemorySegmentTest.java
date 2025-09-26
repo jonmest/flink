@@ -80,13 +80,27 @@ class OffHeapUnsafeMemorySegmentTest extends MemorySegmentTestBase {
         final MemorySegment segment =
                 MemorySegmentFactory.allocateOffHeapUnsafeMemory(10, null, cleaner);
 
-        final Thread t1 = new Thread(segment::free);
-        final Thread t2 = new Thread(segment::free);
+        final java.util.concurrent.atomic.AtomicReference<Throwable> unexpected =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        Runnable callFreeSwallowSecond =
+                () -> {
+                    try {
+                        segment.free();
+                    } catch (IllegalStateException ignored) {
+                        // expected on the losing thread when guard is enabled
+                    } catch (Throwable t) {
+                        unexpected.compareAndSet(null, t);
+                    }
+                };
+
+        final Thread t1 = new Thread(callFreeSwallowSecond);
+        final Thread t2 = new Thread(callFreeSwallowSecond);
         t1.start();
         t2.start();
         t1.join();
         t2.join();
 
         assertThat(counter).hasValue(1);
+        assertThat(unexpected.get()).as("no unexpected exceptions").isNull();
     }
 }
