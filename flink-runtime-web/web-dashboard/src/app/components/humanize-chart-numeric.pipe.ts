@@ -23,26 +23,43 @@ import { isNil } from '@flink-runtime-web/utils';
 import { HumanizeBytesPipe } from './humanize-bytes.pipe';
 import { HumanizeDurationPipe } from './humanize-duration.pipe';
 
-@Pipe({
-  name: 'humanizeChartNumeric'
-})
+@Pipe({ name: 'humanizeChartNumeric' })
 export class HumanizeChartNumericPipe implements PipeTransform {
   transform(value: number, id: string): string {
-    if (isNil(value)) {
-      return '-';
+    if (isNil(value)) return '-';
+
+    const metricId = (id ?? '').toLowerCase();
+    const containsTimerState = metricId.includes('timer_state');
+
+    const isPerSecond =
+      /persecond/.test(metricId) || /\bper\s*second\b/.test(metricId);
+
+    const isBytes =
+      /bytes?/.test(metricId) ||
+      /rocksdb_.*-sst-files-size/.test(metricId) ||
+      /(?:[_-])size\b/.test(metricId);
+
+    const hasLatencyOrDuration = /latency|duration/.test(metricId);
+    const hasWordTimeEnd = /time\b/.test(metricId) && !containsTimerState;
+    const tokenWithUnit =
+      /(time|latency|duration)(?:ms|millis|milliseconds|s|sec|seconds|us|micros|microseconds|ns|nanos|nanoseconds)(?:[_-](?:max|min|avg|mean|median|p\d+))?\b/.test(
+        metricId
+      );
+
+    const isDuration = hasLatencyOrDuration || hasWordTimeEnd || tokenWithUnit;
+
+    if (isBytes && isPerSecond) {
+      return `${new HumanizeBytesPipe().transform(value)} / s`;
     }
-    let returnVal = '';
-    if (/bytes/i.test(id) && /persecond/i.test(id)) {
-      returnVal = `${new HumanizeBytesPipe().transform(value)} / s`;
-    } else if (/bytes/i.test(id)) {
-      returnVal = new HumanizeBytesPipe().transform(value);
-    } else if (/persecond/i.test(id)) {
-      returnVal = `${value} / s`;
-    } else if (/time/i.test(id) || /latency/i.test(id)) {
-      returnVal = new HumanizeDurationPipe().transform(value, true);
-    } else {
-      returnVal = `${value}`;
+    if (isBytes) {
+      return new HumanizeBytesPipe().transform(value);
     }
-    return returnVal;
+    if (isPerSecond) {
+      return `${value} / s`;
+    }
+    if (isDuration) {
+      return new HumanizeDurationPipe().transform(value, true);
+    }
+    return `${value}`;
   }
 }
